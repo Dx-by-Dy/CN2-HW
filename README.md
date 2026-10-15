@@ -1,25 +1,193 @@
-# Потоковое видео через RTSP/RTP (Rust)
+# Потоковое видео через RTSP и RTP (Rust)
 
-Порт кода из `../VideoStreamingCode` на Rust. Места для выполнения задания помечены
-`ДЛЯ ЗАПОЛНЕНИЯ`, как и в исходнике:
+Решение задачи по программированию сокетов 6: сервер и клиент потокового видео.
+Клиент управляет сеансом по RTSP (TCP), сервер передает кадры MJPEG в RTP-пакетах (UDP).
+Исходный учебный код был на Python 2 и Tkinter, здесь он переписан на Rust.
 
-- `src/client.rs`: `send_rtsp_request`, `parse_rtsp_reply`, `open_rtp_port` (RTSP на клиенте);
-- `src/rtp_packet.rs`: `encode` (RTP-пакетирование на сервере).
+Сделано:
 
-| Python             | Rust                                 |
-|--------------------|--------------------------------------|
-| `Server.py`        | `src/bin/server.rs`                  |
-| `ServerWorker.py`  | `src/server_worker.rs`               |
-| `ClientLauncher.py`| `src/bin/client_launcher.rs`         |
-| `Client.py`        | `src/client.rs` (GUI на egui)        |
-| `RtpPacket.py`     | `src/rtp_packet.rs`                  |
-| `VideoStream.py`   | `src/video_stream.rs`                |
+- основное задание: RTSP на клиенте (SETUP, PLAY, PAUSE, TEARDOWN) и RTP-пакетирование на сервере;
+- дополнительное задание 1: статистика сеанса в окне клиента (потери пакетов, скорость потока).
+
+## Установка Rust
+
+Нужен Rust **1.95 или новее**.
+
+**Linux и macOS:**
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+rustc --version
+```
+
+**Windows:** скачайте и запустите `rustup-init.exe` с https://rustup.rs.
+Для сборки нужны Visual Studio Build Tools с компонентом «Desktop development with C++».
+Если их нет, установщик предложит их поставить.
+
+Если Rust уже установлен, но версия старше 1.95, обновите его:
+
+```sh
+rustup update
+```
+
+Дополнительные системные пакеты для сборки обычно не нужны. Клиенту для работы нужен графический
+рабочий стол (X11 или Wayland на Linux). Сервер работает и без графики.
+
+## Сборка
+
+```sh
+cd VideoStreamingRust
+cargo build --release
+```
+
+При первой сборке cargo скачает зависимости, нужен интернет.
+Готовые программы появятся в `VideoStreamingRust/target/release/`:
+`server` и `client` (на Windows `server.exe` и `client.exe`).
+
+## Видеофайл
+
+Видео `movie.Mjpeg` входит в материалы задания (`Socket6_VideoStreaming/VideoStreamingCode/movie.Mjpeg`)
+и в репозиторий не добавлено.
+
+Имя файла клиент передает серверу в запросе SETUP, а **сервер открывает его относительно
+своей текущей папки**. Проще всего запускать сервер из папки, где лежит видео.
 
 ## Запуск
 
+Сначала сервер, потом клиент.
+
 ```sh
-cargo run --release --bin server -- 8554
-cargo run --release --bin client -- 127.0.0.1 8554 25000 ../VideoStreamingCode/movie.Mjpeg
+server <порт_сервера>
+client <адрес_сервера> <порт_сервера> <RTP_порт> <видеофайл>
 ```
 
-Имя видеофайла сервер открывает относительно своего текущего каталога.
+- `порт_сервера` — TCP-порт для RTSP. Выбирайте номер больше 1024, например 8554.
+- `RTP_порт` — UDP-порт на машине клиента, куда сервер будет слать видео, например 25000.
+- `видеофайл` — путь к видео относительно папки сервера.
+
+### На одной машине
+
+```sh
+cd Socket6_VideoStreaming/VideoStreamingCode
+../../VideoStreamingRust/target/release/server 8554
+```
+
+Во втором терминале, из корня репозитория:
+
+```sh
+VideoStreamingRust/target/release/client 127.0.0.1 8554 25000 movie.Mjpeg
+```
+
+Вместо готовых программ можно запускать через cargo из папки `VideoStreamingRust`:
+
+```sh
+cargo run --release --bin server -- 8554
+cargo run --release --bin client -- 127.0.0.1 8554 25000 ../Socket6_VideoStreaming/VideoStreamingCode/movie.Mjpeg
+```
+
+### На разных машинах
+
+Сервер и клиент должны быть в одной локальной сети (или в одной VPN): сервер шлет видео
+по UDP на адрес, с которого пришло RTSP-соединение, и через NAT эти пакеты не пройдут.
+
+1. На сервере откройте TCP-порт сервера:
+   - firewalld (Fedora): `sudo firewall-cmd --add-port=8554/tcp`
+     (до перезагрузки; чтобы сохранить, повторите команду с `--permanent`);
+   - ufw (Ubuntu): `sudo ufw allow 8554/tcp`.
+2. На клиенте разрешите входящий UDP на RTP-порт:
+   - firewalld: `sudo firewall-cmd --add-port=25000/udp`;
+   - ufw: `sudo ufw allow 25000/udp`;
+   - Windows сам спросит разрешение при первом запуске клиента.
+3. Запустите клиент с адресом сервера в локальной сети:
+
+   ```sh
+   client 192.168.0.18 8554 25000 movie.Mjpeg
+   ```
+
+## Работа с клиентом
+
+| Кнопка   | Действие |
+|----------|----------|
+| Setup    | создать сеанс (SETUP) и открыть RTP-порт |
+| Play     | начать или продолжить воспроизведение (PLAY) |
+| Pause    | приостановить воспроизведение (PAUSE) |
+| Teardown | завершить сеанс (TEARDOWN) и закрыть окно |
+
+Если закрыть окно крестиком, воспроизведение встанет на паузу и появится вопрос о выходе.
+Cancel продолжает воспроизведение.
+
+Кнопки работают по диаграмме состояний из задания: например, Play до Setup ничего не делает.
+
+Сервер и клиент пишут в терминал отправленные и полученные RTSP-сообщения и номера
+принятых RTP-пакетов.
+
+## Статистика (дополнительное задание 1)
+
+Панель справа от видео обновляется несколько раз в секунду:
+
+| Показатель        | Как считается |
+|-------------------|---------------|
+| Packets received  | сколько RTP-пакетов пришло |
+| Packets lost      | по пропускам в номерах пакетов, как в RFC 3550: ожидалось `последний − первый + 1`, потеряно `ожидалось − принято`; в скобках доля потерь |
+| Out of order      | пакеты, пришедшие позже пакета с бо́льшим номером |
+| Bitrate           | скорость видеопотока за последнюю секунду, бит/с; на паузе падает до 0 |
+| Average bitrate   | средняя скорость за все время воспроизведения, паузы не учитываются |
+| Frames per second | кадров за последнюю секунду |
+| Data received     | общий объем принятых видеоданных |
+
+Скорость считается по видеоданным без 12-байтных RTP-заголовков.
+Если теряются последние пакеты перед паузой или остановкой, клиент этого не узнает:
+пакета с бо́льшим номером уже не будет.
+
+## Структура проекта
+
+`VideoStreamingRust` — Cargo workspace из трех крейтов:
+
+```
+VideoStreamingRust/
+├── common/src/            общее для клиента и сервера
+│   ├── method.rs            Method: SETUP / PLAY / PAUSE / TEARDOWN
+│   ├── state.rs             State: INIT / READY / PLAYING и переходы между ними
+│   ├── rtsp_request.rs      RtspRequest: сборка и разбор RTSP-запроса
+│   ├── rtsp_reply.rs        RtspReply: сборка и разбор RTSP-ответа
+│   ├── rtp_packet.rs        RtpPacket: кодирование и декодирование RTP-пакета
+│   └── event.rs             Event: флаг остановки для потоков
+├── server/src/
+│   ├── main.rs              разбор аргументов
+│   ├── server.rs            Server: прием TCP-подключений
+│   ├── server_worker.rs     ServerWorker: RTSP-сеанс одного клиента
+│   ├── rtp_sender.rs        RtpSender: отправка кадра каждые 50 мс
+│   └── video_stream.rs      VideoStream: чтение кадров из файла MJPEG
+└── client/src/
+    ├── main.rs, config.rs   запуск и параметры командной строки
+    ├── app.rs               ClientApp: окно, кнопки, диалоги, панель статистики
+    ├── rtsp_client.rs       RtspClient: RTSP-запросы и обработка ответов
+    ├── rtp_receiver.rs      RtpReceiver: прием RTP и декодирование JPEG
+    ├── session.rs           Session: CSeq, номер сеанса, состояние
+    ├── stats.rs             Stats: статистика сеанса
+    ├── ui_handle.rs         UiHandle: передача кадров и предупреждений в окно
+    └── warning.rs           Warning: текст предупреждения
+```
+
+Соответствие исходным файлам на Python:
+
+| Python              | Rust |
+|---------------------|------|
+| `Server.py`         | `server/src/main.rs`, `server/src/server.rs` |
+| `ServerWorker.py`   | `server/src/server_worker.rs`, `server/src/rtp_sender.rs` |
+| `VideoStream.py`    | `server/src/video_stream.rs` |
+| `RtpPacket.py`      | `common/src/rtp_packet.rs` |
+| `ClientLauncher.py` | `client/src/main.rs` |
+| `Client.py`         | `client/src/app.rs`, `client/src/rtsp_client.rs`, `client/src/rtp_receiver.rs` |
+
+Формат RTSP-сообщений совпадает с примером из задания.
+
+## Тесты
+
+```sh
+cd VideoStreamingRust
+cargo test
+```
+
+Тесты проверяют формат RTSP-запросов и ответов, заголовок RTP-пакета и подсчет статистики.
