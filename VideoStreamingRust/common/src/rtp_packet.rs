@@ -1,6 +1,8 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 pub const HEADER_SIZE: usize = 12;
+
+/// Тип нагрузки JPEG/MJPEG и частота его RTP-часов (RFC 3551).
+pub const MJPEG_PAYLOAD_TYPE: u8 = 26;
+pub const MJPEG_CLOCK_RATE: u32 = 90_000;
 
 #[derive(Debug, Clone, Default)]
 pub struct RtpPacket {
@@ -14,6 +16,8 @@ impl RtpPacket {
     }
 
     /// Кодируем RTP-пакет с полями заголовка и полезной нагрузкой (данными).
+    ///
+    /// `timestamp` — метка времени кадра в единицах RTP-часов (для MJPEG 90 кГц).
     #[allow(clippy::too_many_arguments)]
     pub fn encode(
         &mut self,
@@ -22,15 +26,12 @@ impl RtpPacket {
         extension: u8,
         cc: u8,
         seqnum: u16,
+        timestamp: u32,
         marker: u8,
         pt: u8,
         ssrc: u32,
         payload: &[u8],
     ) {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs() as u32)
-            .unwrap_or(0);
         let mut header = [0u8; HEADER_SIZE];
 
         header[0] =
@@ -106,9 +107,10 @@ mod tests {
     #[test]
     fn encode_header() {
         let mut packet = RtpPacket::new();
-        packet.encode(2, 0, 0, 3, 0x1234, 1, 26, 0xDEADBEEF, b"jpeg");
+        packet.encode(2, 0, 0, 3, 0x1234, 0x0102_0304, 1, 26, 0xDEADBEEF, b"jpeg");
         let bytes = packet.get_packet();
         assert_eq!(bytes[..4], [0x83, 0x9A, 0x12, 0x34]);
+        assert_eq!(bytes[4..8], [0x01, 0x02, 0x03, 0x04]);
         assert_eq!(bytes[8..12], [0xDE, 0xAD, 0xBE, 0xEF]);
 
         let mut decoded = RtpPacket::new();
@@ -116,6 +118,7 @@ mod tests {
         assert_eq!(decoded.version(), 2);
         assert_eq!(decoded.payload_type(), 26);
         assert_eq!(decoded.seq_num(), 0x1234);
+        assert_eq!(decoded.timestamp(), 0x0102_0304);
         assert_eq!(decoded.get_payload(), b"jpeg");
     }
 }

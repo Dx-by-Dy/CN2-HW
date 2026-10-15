@@ -23,7 +23,7 @@ impl ClientApp {
     pub fn new(cc: &eframe::CreationContext<'_>, config: Config) -> Self {
         let ui = Arc::new(UiHandle::new(cc.egui_ctx.clone()));
         Self {
-            rtsp: RtspClient::connect(&config, Arc::clone(&ui)),
+            rtsp: RtspClient::new(&config, Arc::clone(&ui)),
             ui,
             texture: None,
             exit_dialog: false,
@@ -85,43 +85,80 @@ impl ClientApp {
         });
     }
 
-    fn stats_panel(&self, ui: &mut egui::Ui) {
-        let now = Instant::now();
-        let state = self.rtsp.state();
-        let stats = self.rtsp.stats();
-        egui::Panel::right("stats")
+    /// Панель справа: описание видео (из DESCRIBE) и статистика сеанса.
+    fn info_panel(&self, ui: &mut egui::Ui) {
+        egui::Panel::right("info")
             .resizable(false)
             .exact_size(250.0)
             .show(ui, |ui| {
-                ui.heading("Statistics");
-                egui::Grid::new("stats_grid")
-                    .num_columns(2)
-                    .striped(true)
-                    .show(ui, |ui| {
-                        let mut row = |name: &str, value: String| {
-                            ui.label(name);
-                            ui.label(value);
-                            ui.end_row();
-                        };
-                        row("Session state", format!("{state:?}").to_uppercase());
-                        row("Packets received", stats.received().to_string());
-                        row(
-                            "Packets lost",
-                            format!("{} ({:.2} %)", stats.lost(), stats.loss_rate() * 100.0),
-                        );
-                        row("Out of order", stats.out_of_order().to_string());
-                        row("Bitrate", format_bitrate(stats.current_bitrate(now)));
-                        row(
-                            "Average bitrate",
-                            format_bitrate(stats.average_bitrate(now)),
-                        );
-                        row(
-                            "Frames per second",
-                            format!("{:.0}", stats.current_fps(now)),
-                        );
-                        row("Data received", format_bytes(stats.total_bytes()));
-                    });
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    self.media_info_section(ui);
+                    ui.separator();
+                    self.stats_section(ui);
+                });
             });
+    }
+
+    fn media_info_section(&self, ui: &mut egui::Ui) {
+        ui.heading("Media info");
+        let Some(info) = self.rtsp.media_info() else {
+            ui.label("Press Play to load");
+            return;
+        };
+        grid(ui, "media_grid", |row| {
+            row(
+                "Codec",
+                format!(
+                    "{} (PT {}, {} kHz)",
+                    info.encoding,
+                    info.payload_type,
+                    info.clock_rate / 1000
+                ),
+            );
+            row("Resolution", format!("{}x{}", info.width, info.height));
+            row("Frame rate", format!("{} fps", info.frame_rate));
+            row("Frames", info.frames.to_string());
+            row("Duration", format!("{:.1} s", info.duration()));
+            row("Bitrate", format_bitrate(info.bitrate as f64));
+        });
+    }
+
+    fn stats_section(&self, ui: &mut egui::Ui) {
+        let state = self.rtsp.state();
+        let total_frames = self
+            .rtsp
+            .media_info()
+            .map_or("?".to_owned(), |info| info.frames.to_string());
+        let frame = self.rtsp.current_frame();
+        let stats = self.rtsp.stats();
+        // После последнего кадра показатели считаются на момент его получения
+        let now = stats.frozen_at().unwrap_or_else(Instant::now);
+
+        ui.heading(if stats.frozen_at().is_some() {
+            "Statistics (finished)"
+        } else {
+            "Statistics"
+        });
+        grid(ui, "stats_grid", |row| {
+            row("Session state", format!("{state:?}").to_uppercase());
+            row("Frame", format!("{frame}/{total_frames}"));
+            row("Packets received", stats.received().to_string());
+            row(
+                "Packets lost",
+                format!("{} ({:.2} %)", stats.lost(), stats.loss_rate() * 100.0),
+            );
+            row("Out of order", stats.out_of_order().to_string());
+            row("Bitrate", format_bitrate(stats.current_bitrate(now)));
+            row(
+                "Average bitrate",
+                format_bitrate(stats.average_bitrate(now)),
+            );
+            row(
+                "Frames per second",
+                format!("{:.0}", stats.current_fps(now)),
+            );
+            row("Data received", format_bytes(stats.total_bytes()));
+        });
     }
 
     fn video_panel(&self, ui: &mut egui::Ui) {
@@ -177,13 +214,27 @@ impl eframe::App for ClientApp {
         self.update_texture(&ctx);
         self.handle_close_request(&ctx);
         self.buttons_panel(ui);
-        self.stats_panel(ui);
+        self.info_panel(ui);
         self.video_panel(ui);
         self.exit_dialog(&ctx);
         self.warning_dialog(&ctx);
         // Обновляем статистику и на паузе, когда кадры не приходят
         ctx.request_repaint_after(Duration::from_millis(250));
     }
+}
+
+/// Таблица «название — значение» в две колонки.
+fn grid(ui: &mut egui::Ui, id: &str, add_rows: impl FnOnce(&mut dyn FnMut(&str, String))) {
+    egui::Grid::new(id)
+        .num_columns(2)
+        .striped(true)
+        .show(ui, |ui| {
+            add_rows(&mut |name, value| {
+                ui.label(name);
+                ui.label(value);
+                ui.end_row();
+            });
+        });
 }
 
 fn format_bitrate(bits_per_sec: f64) -> String {

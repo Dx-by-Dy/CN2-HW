@@ -12,6 +12,7 @@ pub struct Session {
     pub request_sent: Option<Method>,
     /// Ждем ответа на последний запрос: новые запросы до ответа не отправляем.
     pub awaiting_reply: bool,
-    /// PLAY нажали без сеанса: после ответа на SETUP сразу отправить PLAY.
-    pub play_after_setup: bool,
+    /// Play нажали без сеанса: продолжаем цепочку DESCRIBE → SETUP → PLAY
+    /// по мере прихода ответов.
+    pub play_requested: bool,
 }

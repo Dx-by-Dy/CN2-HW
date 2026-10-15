@@ -16,8 +16,10 @@ pub struct RtspRequest {
     pub cseq: u32,
     /// Заголовок Transport: только в SETUP.
     pub client_port: Option<u16>,
-    /// Заголовок Session: во всех запросах, кроме SETUP.
+    /// Заголовок Session: в запросах внутри сеанса (PLAY, PAUSE, TEARDOWN).
     pub session: Option<u32>,
+    /// Заголовок Accept: формат описания в ответе на DESCRIBE.
+    pub accept: Option<String>,
 }
 
 impl RtspRequest {
@@ -30,6 +32,7 @@ impl RtspRequest {
         let mut cseq = None;
         let mut client_port = None;
         let mut session = None;
+        let mut accept = None;
         for line in lines {
             let Some((name, value)) = line.split_once(':') else {
                 continue;
@@ -37,6 +40,7 @@ impl RtspRequest {
             match name.trim() {
                 "CSeq" => cseq = value.trim().parse().ok(),
                 "Session" => session = value.trim().parse().ok(),
+                "Accept" => accept = Some(value.trim().to_owned()),
                 "Transport" => {
                     client_port = value
                         .split_once("client_port=")
@@ -52,6 +56,7 @@ impl RtspRequest {
             cseq: cseq?,
             client_port,
             session,
+            accept,
         })
     }
 }
@@ -69,6 +74,9 @@ impl fmt::Display for RtspRequest {
         if let Some(session) = self.session {
             write!(f, "\nSession: {session}")?;
         }
+        if let Some(accept) = &self.accept {
+            write!(f, "\nAccept: {accept}")?;
+        }
         Ok(())
     }
 }
@@ -85,6 +93,7 @@ mod tests {
             cseq: 1,
             client_port: Some(25000),
             session: None,
+            accept: None,
         };
         let text = "SETUP movie.Mjpeg RTSP/1.0\nCSeq: 1\nTransport: RTP/UDP; client_port= 25000";
         assert_eq!(request.to_string(), text);

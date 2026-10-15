@@ -4,6 +4,7 @@ use std::str::FromStr;
 /// Метод RTSP-запроса.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
+    Describe,
     Setup,
     Play,
     Pause,
@@ -13,6 +14,7 @@ pub enum Method {
 impl Method {
     pub fn as_str(self) -> &'static str {
         match self {
+            Method::Describe => "DESCRIBE",
             Method::Setup => "SETUP",
             Method::Play => "PLAY",
             Method::Pause => "PAUSE",
@@ -32,6 +34,7 @@ impl FromStr for Method {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            "DESCRIBE" => Ok(Method::Describe),
             "SETUP" => Ok(Method::Setup),
             "PLAY" => Ok(Method::Play),
             "PAUSE" => Ok(Method::Pause),

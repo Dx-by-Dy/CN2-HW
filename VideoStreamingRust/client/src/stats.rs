@@ -22,12 +22,16 @@ pub struct Stats {
     playing_since: Option<Instant>,
     /// Суммарное время воспроизведения в завершенных интервалах.
     played: Duration,
+    /// Момент получения последнего кадра видео: статистика на нем замирает.
+    finished_at: Option<Instant>,
 }
 
 impl Stats {
     /// Начало воспроизведения (PLAY).
     pub fn on_play(&mut self, now: Instant) {
-        self.playing_since.get_or_insert(now);
+        if self.finished_at.is_none() {
+            self.playing_since.get_or_insert(now);
+        }
     }
 
     /// Остановка воспроизведения (PAUSE/TEARDOWN): паузы не входят в среднюю скорость.
@@ -35,6 +39,18 @@ impl Stats {
         if let Some(since) = self.playing_since.take() {
             self.played += now.duration_since(since);
         }
+    }
+
+    /// Видео закончилось: останавливаем отсчет времени.
+    pub fn finish(&mut self, now: Instant) {
+        self.on_pause(now);
+        self.finished_at.get_or_insert(now);
+    }
+
+    /// Момент, на котором статистика замерла (`None` — видео еще идет).
+    /// Показатели, зависящие от времени, нужно считать на этот момент.
+    pub fn frozen_at(&self) -> Option<Instant> {
+        self.finished_at
     }
 
     pub fn on_packet(&mut self, seq: u16, payload_len: usize, now: Instant) {
@@ -154,6 +170,26 @@ mod tests {
         assert_eq!(stats.current_fps(now), 2.0);
         // Через 2 секунды без пакетов скорость падает до нуля
         assert_eq!(stats.current_bitrate(now + Duration::from_secs(2)), 0.0);
+    }
+
+    #[test]
+    fn frozen_after_finish() {
+        let start = Instant::now();
+        let mut stats = Stats::default();
+        stats.on_play(start);
+        stats.on_packet(1, 1000, start + Duration::from_millis(500));
+        stats.on_packet(2, 1000, start + Duration::from_millis(1000));
+        stats.finish(start + Duration::from_millis(1000));
+
+        let frozen = stats.frozen_at().unwrap();
+        assert_eq!(stats.current_bitrate(frozen), 2.0 * 1000.0 * 8.0);
+        assert_eq!(stats.average_bitrate(frozen), 2.0 * 1000.0 * 8.0);
+        // Время после окончания не учитывается, в том числе после Play
+        stats.on_play(start + Duration::from_secs(5));
+        assert_eq!(
+            stats.average_bitrate(start + Duration::from_secs(10)),
+            16000.0
+        );
     }
 
     #[test]

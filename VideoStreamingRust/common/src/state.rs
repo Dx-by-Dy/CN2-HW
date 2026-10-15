@@ -19,6 +19,7 @@ impl State {
     /// Можно ли выполнить `method` в этом состоянии.
     pub fn allows(self, method: Method) -> bool {
         match method {
+            Method::Describe => true,
             Method::Setup => self == State::Init,
             Method::Play => self == State::Ready,
             Method::Pause => self == State::Playing,
@@ -26,9 +27,10 @@ impl State {
         }
     }
 
-    /// Состояние после успешного выполнения `method`.
+    /// Состояние после успешного выполнения `method` (DESCRIBE его не меняет).
     pub fn after(self, method: Method) -> State {
         match method {
+            Method::Describe => self,
             Method::Setup | Method::Pause => State::Ready,
             Method::Play => State::Playing,
             Method::Teardown => State::Init,

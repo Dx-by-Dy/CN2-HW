@@ -1,6 +1,6 @@
 use std::io;
 use std::net::UdpSocket;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -18,6 +18,8 @@ pub struct RtpReceiver {
     stop: Mutex<Arc<Event>>,
     /// Номер последнего показанного кадра.
     frame_nbr: AtomicU16,
+    /// Число кадров в видео из DESCRIBE (0 — неизвестно).
+    total_frames: AtomicU32,
     stats: Mutex<Stats>,
     ui: Arc<UiHandle>,
 }
@@ -28,6 +30,7 @@ impl RtpReceiver {
             socket: Mutex::new(None),
             stop: Mutex::new(Arc::new(Event::new())),
             frame_nbr: AtomicU16::new(0),
+            total_frames: AtomicU32::new(0),
             stats: Mutex::new(Stats::default()),
             ui,
         }
@@ -77,6 +80,14 @@ impl RtpReceiver {
         self.stats.lock().unwrap()
     }
 
+    pub fn frame_nbr(&self) -> u16 {
+        self.frame_nbr.load(Ordering::Relaxed)
+    }
+
+    pub fn set_total_frames(&self, frames: u32) {
+        self.total_frames.store(frames, Ordering::Relaxed);
+    }
+
     fn listen(&self, stop: &Event) {
         let Some(socket) = self.socket.lock().unwrap().clone() else {
             return;
@@ -96,8 +107,16 @@ impl RtpReceiver {
 
         let curr_frame_nbr = packet.seq_num();
         println!("Current seq num: {curr_frame_nbr}");
-        self.stats()
-            .on_packet(curr_frame_nbr, packet.get_payload().len(), Instant::now());
+
+        let now = Instant::now();
+        let mut stats = self.stats();
+        stats.on_packet(curr_frame_nbr, packet.get_payload().len(), now);
+        // Последний кадр видео: дальше пакетов не будет, замораживаем статистику
+        let total = self.total_frames.load(Ordering::Relaxed);
+        if total != 0 && u32::from(curr_frame_nbr) >= total {
+            stats.finish(now);
+        }
+        drop(stats);
 
         // Отбрасываем опоздавшие пакеты
         if curr_frame_nbr > self.frame_nbr.load(Ordering::Relaxed) {

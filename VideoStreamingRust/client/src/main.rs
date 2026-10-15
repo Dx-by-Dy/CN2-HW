@@ -19,7 +19,7 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("RTPClient")
-            .with_inner_size([920.0, 360.0]),
+            .with_inner_size([920.0, 480.0]),
         ..Default::default()
     };
 
