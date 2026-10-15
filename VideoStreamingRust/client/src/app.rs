@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use common::State;
 use eframe::egui;
 
 use crate::config::Config;
@@ -13,6 +14,8 @@ pub struct ClientApp {
     ui: Arc<UiHandle>,
     texture: Option<egui::TextureHandle>,
     exit_dialog: bool,
+    /// Шло ли воспроизведение до появления диалога выхода (Cancel его продолжит).
+    resume_after_dialog: bool,
     exiting: bool,
 }
 
@@ -24,13 +27,14 @@ impl ClientApp {
             ui,
             texture: None,
             exit_dialog: false,
+            resume_after_dialog: false,
             exiting: false,
         }
     }
 
-    /// Teardown: завершаем сеанс и закрываем окно.
+    /// Выход: завершаем сеанс и закрываем окно.
     fn exit(&mut self, ctx: &egui::Context) {
-        self.rtsp.teardown();
+        self.rtsp.stop();
         self.exiting = true;
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
@@ -51,29 +55,31 @@ impl ClientApp {
     fn handle_close_request(&mut self, ctx: &egui::Context) {
         if ctx.input(|i| i.viewport().close_requested()) && !self.exiting {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.resume_after_dialog = self.rtsp.state() == State::Playing;
             self.rtsp.pause();
             self.exit_dialog = true;
         }
     }
 
-    fn buttons_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    /// Кнопки плеера; недоступные в текущем состоянии неактивны.
+    fn buttons_panel(&mut self, ui: &mut egui::Ui) {
+        let state = self.rtsp.state();
         egui::Panel::bottom("buttons").show(ui, |ui| {
-            ui.columns(4, |cols| {
-                let button = |ui: &mut egui::Ui, text: &str| {
-                    ui.add_sized([ui.available_width(), 28.0], egui::Button::new(text))
+            ui.columns(3, |cols| {
+                let button = |ui: &mut egui::Ui, text: &str, enabled: bool| {
+                    let size = [ui.available_width(), 28.0];
+                    ui.add_enabled_ui(enabled, |ui| ui.add_sized(size, egui::Button::new(text)))
+                        .inner
                         .clicked()
                 };
-                if button(&mut cols[0], "Setup") {
-                    self.rtsp.setup();
-                }
-                if button(&mut cols[1], "Play") {
+                if button(&mut cols[0], "Play", state != State::Playing) {
                     self.rtsp.play();
                 }
-                if button(&mut cols[2], "Pause") {
+                if button(&mut cols[1], "Pause", state == State::Playing) {
                     self.rtsp.pause();
                 }
-                if button(&mut cols[3], "Teardown") {
-                    self.exit(ctx);
+                if button(&mut cols[2], "Stop", state != State::Init) {
+                    self.rtsp.stop();
                 }
             });
         });
@@ -81,6 +87,7 @@ impl ClientApp {
 
     fn stats_panel(&self, ui: &mut egui::Ui) {
         let now = Instant::now();
+        let state = self.rtsp.state();
         let stats = self.rtsp.stats();
         egui::Panel::right("stats")
             .resizable(false)
@@ -96,6 +103,7 @@ impl ClientApp {
                             ui.label(value);
                             ui.end_row();
                         };
+                        row("Session state", format!("{state:?}").to_uppercase());
                         row("Packets received", stats.received().to_string());
                         row(
                             "Packets lost",
@@ -138,10 +146,12 @@ impl ClientApp {
                     self.exit_dialog = false;
                     self.exit(ctx);
                 }
-                // Cancel — продолжаем воспроизведение
+                // Cancel — продолжаем воспроизведение, если оно шло
                 if ui.button("Cancel").clicked() {
                     self.exit_dialog = false;
-                    self.rtsp.play();
+                    if self.resume_after_dialog {
+                        self.rtsp.play();
+                    }
                 }
             });
         });
@@ -166,7 +176,7 @@ impl eframe::App for ClientApp {
         let ctx = ui.ctx().clone();
         self.update_texture(&ctx);
         self.handle_close_request(&ctx);
-        self.buttons_panel(ui, &ctx);
+        self.buttons_panel(ui);
         self.stats_panel(ui);
         self.video_panel(ui);
         self.exit_dialog(&ctx);

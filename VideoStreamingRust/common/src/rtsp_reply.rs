@@ -15,16 +15,21 @@ pub struct RtspReply {
 }
 
 impl RtspReply {
+    pub const OK: u16 = 200;
+    pub const NOT_FOUND: u16 = 404;
+    pub const METHOD_NOT_VALID: u16 = 455;
+    pub const INTERNAL_ERROR: u16 = 500;
+
     pub fn ok(cseq: u32, session: u32) -> Self {
         Self {
-            code: 200,
+            code: Self::OK,
             cseq,
             session,
         }
     }
 
     pub fn is_ok(&self) -> bool {
-        self.code == 200
+        self.code == Self::OK
     }
 
     pub fn parse(text: &str) -> Option<Self> {
@@ -51,12 +56,13 @@ impl RtspReply {
         })
     }
 
-    fn reason(&self) -> &'static str {
+    pub fn reason(&self) -> &'static str {
         match self.code {
-            200 => "OK",
-            404 => "FILE_NOT_FOUND",
-            500 => "CONNECTION_ERROR",
-            _ => "UNKNOWN",
+            Self::OK => "OK",
+            Self::NOT_FOUND => "Not Found",
+            Self::METHOD_NOT_VALID => "Method Not Valid in This State",
+            Self::INTERNAL_ERROR => "Internal Server Error",
+            _ => "Unknown",
         }
     }
 }

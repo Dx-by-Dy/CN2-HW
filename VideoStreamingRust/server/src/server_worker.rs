@@ -57,14 +57,32 @@ impl ServerWorker {
         self.stop_streaming();
     }
 
+    /// Обрабатываем запрос и всегда отвечаем: 200 или код ошибки.
     fn process_rtsp_request(&mut self, request: RtspRequest) {
-        if !self.state.allows(request.method) {
-            return;
-        }
         println!("Processing {}\n", request.method);
 
-        let result = match request.method {
-            Method::Setup => self.setup(&request),
+        let result = if !self.state.allows(request.method) {
+            Err(RtspReply::METHOD_NOT_VALID)
+        } else {
+            self.execute(&request)
+        };
+        let code = match result {
+            Ok(()) => {
+                self.state = self.state.after(request.method);
+                RtspReply::OK
+            }
+            Err(code) => code,
+        };
+        self.reply(RtspReply {
+            code,
+            cseq: request.cseq,
+            session: self.session,
+        });
+    }
+
+    fn execute(&mut self, request: &RtspRequest) -> Result<(), u16> {
+        match request.method {
+            Method::Setup => self.setup(request),
             Method::Play => self.play(),
             Method::Pause => {
                 self.stop_streaming();
@@ -75,27 +93,19 @@ impl ServerWorker {
                 self.video = None;
                 Ok(())
             }
-        };
-
-        match result {
-            Ok(()) => {
-                self.state = self.state.after(request.method);
-                self.reply_ok(request.cseq);
-            }
-            Err(code) => println!("{code}"),
         }
     }
 
-    fn setup(&mut self, request: &RtspRequest) -> Result<(), &'static str> {
-        self.video = Some(VideoStream::open(&request.file_name).map_err(|_| "404 File not found")?);
+    fn setup(&mut self, request: &RtspRequest) -> Result<(), u16> {
+        self.video = Some(VideoStream::open(&request.file_name).map_err(|_| RtspReply::NOT_FOUND)?);
         self.rtp_port = request.client_port;
         // Генерируем случайный идентификатор сеанса RTSP
         self.session = rand::rng().random_range(100000..=999999);
         Ok(())
     }
 
-    fn play(&mut self) -> Result<(), &'static str> {
-        const CON_ERR: &str = "500 Connection error";
+    fn play(&mut self) -> Result<(), u16> {
+        const CON_ERR: u16 = RtspReply::INTERNAL_ERROR;
         let port = self.rtp_port.ok_or(CON_ERR)?;
         let video = self.video.take().ok_or(CON_ERR)?;
         let dest = SocketAddr::new(self.client_ip, port);
@@ -110,9 +120,15 @@ impl ServerWorker {
         }
     }
 
-    fn reply_ok(&mut self, cseq: u32) {
-        let reply = RtspReply::ok(cseq, self.session).to_string();
-        if self.rtsp_socket.write_all(reply.as_bytes()).is_err() {
+    fn reply(&mut self, reply: RtspReply) {
+        if !reply.is_ok() {
+            println!("{} {}\n", reply.code, reply.reason());
+        }
+        if self
+            .rtsp_socket
+            .write_all(reply.to_string().as_bytes())
+            .is_err()
+        {
             println!("Connection error");
         }
     }

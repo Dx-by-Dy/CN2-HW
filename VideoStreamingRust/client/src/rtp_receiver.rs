@@ -33,12 +33,22 @@ impl RtpReceiver {
         }
     }
 
-    /// Открываем RTP-сокет, привязанный к указанному порту.
+    /// Готовим прием для нового сеанса (SETUP).
+    ///
+    /// Сокет открывается один раз и живет до выхода из программы: так порт не
+    /// приходится заново занимать после Stop. Пакеты прошлого сеанса, оставшиеся
+    /// в буфере сокета, выбрасываем, чтобы они не попали в новый сеанс.
     pub fn open(&self, port: u16) -> io::Result<()> {
-        let socket = UdpSocket::bind(("0.0.0.0", port))?;
-        socket.set_read_timeout(Some(Duration::from_millis(500)))?;
-        *self.socket.lock().unwrap() = Some(Arc::new(socket));
-        Ok(())
+        let mut socket = self.socket.lock().unwrap();
+        match socket.as_ref() {
+            Some(socket) => drain(socket),
+            None => {
+                let new_socket = UdpSocket::bind(("0.0.0.0", port))?;
+                new_socket.set_read_timeout(Some(Duration::from_millis(500)))?;
+                *socket = Some(Arc::new(new_socket));
+                Ok(())
+            }
+        }
     }
 
     /// Запускаем поток приема (PLAY).
@@ -50,16 +60,17 @@ impl RtpReceiver {
         thread::spawn(move || receiver.listen(&stop));
     }
 
-    /// Останавливаем поток приема (PAUSE).
+    /// Останавливаем поток приема (PAUSE, TEARDOWN).
     pub fn stop(&self) {
         self.stop.lock().unwrap().set();
         self.stats().on_pause(Instant::now());
     }
 
-    /// Останавливаем прием и закрываем сокет (TEARDOWN).
-    pub fn close(&self) {
-        self.stop();
-        *self.socket.lock().unwrap() = None;
+    /// Сеанс завершен (TEARDOWN): в новом сеансе кадры снова нумеруются с 1,
+    /// поэтому сбрасываем номер последнего кадра и статистику.
+    pub fn reset(&self) {
+        self.frame_nbr.store(0, Ordering::Relaxed);
+        *self.stats() = Stats::default();
     }
 
     pub fn stats(&self) -> MutexGuard<'_, Stats> {
@@ -97,6 +108,14 @@ impl RtpReceiver {
             }
         }
     }
+}
+
+/// Читаем из сокета все, что в нем накопилось, не блокируясь.
+fn drain(socket: &UdpSocket) -> io::Result<()> {
+    socket.set_nonblocking(true)?;
+    let mut buf = [0u8; 20480];
+    while socket.recv(&mut buf).is_ok() {}
+    socket.set_nonblocking(false)
 }
 
 fn decode_jpeg(data: &[u8]) -> Option<egui::ColorImage> {
