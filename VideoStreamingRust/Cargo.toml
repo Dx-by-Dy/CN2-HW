@@ -1,0 +1,17 @@
+[package]
+name = "video_streaming"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eframe = "0.37"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+rand = "0.9"
+
+[[bin]]
+name = "server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "client"
+path = "src/bin/client_launcher.rs"
