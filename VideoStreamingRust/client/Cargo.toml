@@ -1,0 +1,9 @@
+[package]
+name = "client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+common = { path = "../common" }
+eframe = "0.37"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }

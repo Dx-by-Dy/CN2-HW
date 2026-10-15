@@ -33,7 +33,8 @@ impl RtpPacket {
             .unwrap_or(0);
         let mut header = [0u8; HEADER_SIZE];
 
-        header[0] =  (version & 0b11) << 6 | (padding & 0b1) << 5 | (extension & 0b1) << 4 | (cc & 0b1111);
+        header[0] =
+            (version & 0b11) << 6 | (padding & 0b1) << 5 | (extension & 0b1) << 4 | (cc & 0b1111);
         header[1] = (marker & 0b1) << 7 | (pt & 0b0111_1111);
 
         header[2] = (seqnum >> 8) as u8;
@@ -48,8 +49,8 @@ impl RtpPacket {
         header[9] = (ssrc >> 16) as u8;
         header[10] = (ssrc >> 8) as u8;
         header[11] = ssrc as u8;
-        self.header = header;
 
+        self.header = header;
         self.payload = payload.to_vec();
     }
 
@@ -95,5 +96,26 @@ impl RtpPacket {
         packet.extend_from_slice(&self.header);
         packet.extend_from_slice(&self.payload);
         packet
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_header() {
+        let mut packet = RtpPacket::new();
+        packet.encode(2, 0, 0, 3, 0x1234, 1, 26, 0xDEADBEEF, b"jpeg");
+        let bytes = packet.get_packet();
+        assert_eq!(bytes[..4], [0x83, 0x9A, 0x12, 0x34]);
+        assert_eq!(bytes[8..12], [0xDE, 0xAD, 0xBE, 0xEF]);
+
+        let mut decoded = RtpPacket::new();
+        decoded.decode(&bytes);
+        assert_eq!(decoded.version(), 2);
+        assert_eq!(decoded.payload_type(), 26);
+        assert_eq!(decoded.seq_num(), 0x1234);
+        assert_eq!(decoded.get_payload(), b"jpeg");
     }
 }

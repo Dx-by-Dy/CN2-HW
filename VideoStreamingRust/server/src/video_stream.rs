@@ -1,13 +1,14 @@
 use std::fs::File;
 use std::io::{self, BufReader, Read};
 
+/// Чтение кадров из файла MJPEG: перед каждым JPEG-кадром идут 5 байт с его длиной.
 pub struct VideoStream {
     file: BufReader<File>,
     frame_num: u32,
 }
 
 impl VideoStream {
-    pub fn new(filename: &str) -> io::Result<Self> {
+    pub fn open(filename: &str) -> io::Result<Self> {
         let file = File::open(filename)?;
         Ok(Self {
             file: BufReader::new(file),

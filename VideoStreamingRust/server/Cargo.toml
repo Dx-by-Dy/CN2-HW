@@ -1,0 +1,8 @@
+[package]
+name = "server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+common = { path = "../common" }
+rand = "0.9"

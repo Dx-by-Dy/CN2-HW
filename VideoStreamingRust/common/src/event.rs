@@ -25,7 +25,10 @@ impl Event {
     /// Ждем установки флага не дольше `timeout`. Возвращаем значение флага.
     pub fn wait(&self, timeout: Duration) -> bool {
         let flag = self.flag.lock().unwrap();
-        let (flag, _) = self.cv.wait_timeout_while(flag, timeout, |set| !*set).unwrap();
+        let (flag, _) = self
+            .cv
+            .wait_timeout_while(flag, timeout, |set| !*set)
+            .unwrap();
         *flag
     }
 }
