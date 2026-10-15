@@ -15,7 +15,6 @@ impl RtpPacket {
 
     /// Кодируем RTP-пакет с полями заголовка и полезной нагрузкой (данными).
     #[allow(clippy::too_many_arguments)]
-    #[allow(unused_variables, unused_mut)] // убрать после заполнения
     pub fn encode(
         &mut self,
         version: u8,
@@ -33,17 +32,25 @@ impl RtpPacket {
             .map(|d| d.as_secs() as u32)
             .unwrap_or(0);
         let mut header = [0u8; HEADER_SIZE];
-        //----------------
-        // ДЛЯ ЗАПОЛНЕНИЯ
-        //----------------
-        // Заполняем байтовый массив header полями RTP-заголовка
 
-        // header[0] = ...
-        // ...
-        // self.header = header;
+        header[0] =  (version & 0b11) << 6 | (padding & 0b1) << 5 | (extension & 0b1) << 4 | (cc & 0b1111);
+        header[1] = (marker & 0b1) << 7 | (pt & 0b0111_1111);
 
-        // Получаем данные из аргумента
-        // self.payload = ...
+        header[2] = (seqnum >> 8) as u8;
+        header[3] = seqnum as u8;
+
+        header[4] = (timestamp >> 24) as u8;
+        header[5] = (timestamp >> 16) as u8;
+        header[6] = (timestamp >> 8) as u8;
+        header[7] = timestamp as u8;
+
+        header[8] = (ssrc >> 24) as u8;
+        header[9] = (ssrc >> 16) as u8;
+        header[10] = (ssrc >> 8) as u8;
+        header[11] = ssrc as u8;
+        self.header = header;
+
+        self.payload = payload.to_vec();
     }
 
     /// Декодируем RTP-пакет.

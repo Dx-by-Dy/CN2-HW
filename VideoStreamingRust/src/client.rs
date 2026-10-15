@@ -1,9 +1,10 @@
 use std::collections::VecDeque;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpStream, UdpSocket};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use eframe::egui;
 
@@ -150,12 +151,6 @@ impl ClientCore {
     }
 
     /// Отправляем RTSP-запрос серверу.
-    #[allow(
-        unreachable_code,
-        unused_variables,
-        unused_mut,
-        clippy::diverging_sub_expression
-    )] // убрать после заполнения
     pub fn send_rtsp_request(self: &Arc<Self>, request_code: Request) {
         let mut s = self.rtsp.lock().unwrap();
         let request: String;
@@ -167,54 +162,57 @@ impl ClientCore {
         if request_code == Request::Setup && s.state == State::Init {
             let core = Arc::clone(self);
             thread::spawn(move || core.recv_rtsp_reply());
-            // Обновляем номер последовательности RTSP.
-            // ...
 
-            // Записываем RTSP-запрос для отправки.
-            request = todo!("request = ...");
+            s.rtsp_seq += 1;
 
-            // Отслеживаем отправленный запрос.
-            // s.request_sent = ...
+            request = format!(
+                "SETUP {} RTSP/1.0\nCSeq: {}\nTransport: RTP/UDP; client_port= {}",
+                self.file_name, s.rtsp_seq, self.rtp_port
+            );
+
+            s.request_sent = Some(request_code);
         }
         // Play-запрос
         else if request_code == Request::Play && s.state == State::Ready {
-            // Обновляем номер последовательности RTSP.
-            // ...
+            s.rtsp_seq += 1;
 
-            // Записываем RTSP-запрос для отправки.
-            request = todo!("request = ...");
+            request = format!(
+                "PLAY {} RTSP/1.0\nCSeq: {}\nSession: {}",
+                self.file_name, s.rtsp_seq, s.session_id
+            );
 
-            // Отслеживаем отправленный запрос.
-            // s.request_sent = ...
+            s.request_sent = Some(request_code);
         }
         // Pause-запрос
         else if request_code == Request::Pause && s.state == State::Playing {
-            // Обновляем номер последовательности RTSP.
-            // ...
+            s.rtsp_seq += 1;
 
-            // Записываем RTSP-запрос для отправки.
-            request = todo!("request = ...");
+            request = format!(
+                "PAUSE {} RTSP/1.0\nCSeq: {}\nSession: {}",
+                self.file_name, s.rtsp_seq, s.session_id
+            );
 
-            // Отслеживаем отправленный запрос.
-            // s.request_sent = ...
+            s.request_sent = Some(request_code);
         }
         // Teardown-запрос
         else if request_code == Request::Teardown && s.state != State::Init {
-            // Обновляем номер последовательности RTSP.
-            // ...
+            s.rtsp_seq += 1;
 
-            // Записываем RTSP-запрос для отправки.
-            request = todo!("request = ...");
+            request = format!(
+                "TEARDOWN {} RTSP/1.0\nCSeq: {}\nSession: {}",
+                self.file_name, s.rtsp_seq, s.session_id
+            );
 
-            // Отслеживаем отправленный запрос.
-            // s.request_sent = ...
+            s.request_sent = Some(request_code);
         } else {
             return;
         }
 
-        // Отправляем RTSP-запрос, используя rtsp_socket.
-        // (self.rtsp_socket: Option<TcpStream>; для &TcpStream реализован Write)
-        // ...
+        if let Some(sock) = &self.rtsp_socket {
+            if let Err(e) = (&*sock).write_all(request.as_bytes()) {
+                println!("Не удалось отправить RTSP-запрос: {e}");
+            }
+        }
 
         println!("\nData sent:\n{request}");
     }
@@ -264,28 +262,16 @@ impl ClientCore {
             if s.session_id == session && field(0) == Some(200) {
                 match s.request_sent {
                     Some(Request::Setup) => {
-                        //---------------
-                        // ДЛЯ ЗАПОЛНЕНИЯ
-                        //---------------
-                        // Обновляем состояние RTSP-сеанса.
-                        // s.state = ...
-
-                        // Открываем RTP-порт.
+                        s.state = State::Ready;
                         self.open_rtp_port();
                     }
-                    Some(Request::Play) => {
-                        // s.state = ...
-                    }
+                    Some(Request::Play) => s.state = State::Playing,
                     Some(Request::Pause) => {
-                        // s.state = ...
-
-                        // Поток воспроизведения уже существует. Создаем новый при возобновлении воспроизведения.
+                        s.state = State::Ready;
                         self.play_event.lock().unwrap().set();
                     }
                     Some(Request::Teardown) => {
-                        // s.state = ...
-
-                        // Устанавливаем флаг ACK для закрытия сокета.
+                        s.state = State::Init;
                         s.teardown_acked = true;
                     }
                     None => {}
@@ -295,25 +281,14 @@ impl ClientCore {
     }
 
     /// Открываем RTP-сокет, привязанный к указанному порту.
-    #[allow(
-        unreachable_code,
-        unused_variables,
-        unused_mut,
-        clippy::diverging_sub_expression
-    )] // убрать после заполнения
     fn open_rtp_port(&self) {
-        //---------------
-        // ДЛЯ ЗАПОЛНЕНИЯ
-        //---------------
-        // Создаем новый датаграммный сокет для получения RTP-пакетов от сервера
-        // и связываем его с адресом, используя RTP-порт, указанный клиентом
-        // (в Rust UDP-сокет создается сразу привязанным: UdpSocket::bind).
-        let bound: io::Result<UdpSocket> = todo!("UdpSocket::bind(...)");
+        let bound: io::Result<UdpSocket> = UdpSocket::bind(("0.0.0.0", self.rtp_port));
 
         match bound {
-            Ok(mut rtp_socket) => {
-                // Устанавливаем значение тайм-аута сокета в 0.5 сек
-                // ...
+            Ok(rtp_socket) => {
+                rtp_socket
+                    .set_read_timeout(Some(Duration::from_millis(500)))
+                    .unwrap();
 
                 *self.rtp_socket.lock().unwrap() = Some(Arc::new(rtp_socket));
             }
