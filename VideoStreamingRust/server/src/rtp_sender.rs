@@ -31,7 +31,7 @@ impl RtpSender {
     /// Останавливаем передачу (PAUSE/TEARDOWN). Возвращаем видео, чтобы продолжить с того же кадра.
     pub fn stop(self) -> VideoStream {
         self.stop.set();
-        self.worker.join().expect("поток RTP завершился с паникой")
+        self.worker.join().expect("RTP sender thread panicked")
     }
 }
 
@@ -47,7 +47,7 @@ fn send_frames(
         };
         let packet = make_rtp(&frame, video.frame_nbr());
         if socket.send_to(&packet, dest).is_err() {
-            println!("Ошибка соединения");
+            println!("Connection error");
         }
     }
     video

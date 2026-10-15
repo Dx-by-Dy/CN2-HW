@@ -19,7 +19,7 @@ impl Server {
         loop {
             match self.listener.accept() {
                 Ok((socket, addr)) => ServerWorker::new(socket, addr.ip()).spawn(),
-                Err(e) => eprintln!("Ошибка accept: {e}"),
+                Err(e) => eprintln!("accept failed: {e}"),
             }
         }
     }

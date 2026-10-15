@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 
 use common::{Method, RtspReply, RtspRequest};
@@ -8,6 +8,7 @@ use common::{Method, RtspReply, RtspRequest};
 use crate::config::Config;
 use crate::rtp_receiver::RtpReceiver;
 use crate::session::Session;
+use crate::stats::Stats;
 use crate::ui_handle::UiHandle;
 
 /// RTSP-клиент: отправляет запросы и обрабатывает ответы сервера.
@@ -27,8 +28,8 @@ impl RtspClient {
         let socket = TcpStream::connect((config.server_addr.as_str(), config.server_port)).ok();
         if socket.is_none() {
             ui.show_warning(
-                "Соединение невозможно",
-                format!("Соединение с '{}' невозможно.", config.server_addr),
+                "Connection failed",
+                format!("Cannot connect to '{}'.", config.server_addr),
             );
         }
 
@@ -45,6 +46,10 @@ impl RtspClient {
             thread::spawn(move || client.recv_rtsp_replies());
         }
         client
+    }
+
+    pub fn stats(&self) -> MutexGuard<'_, Stats> {
+        self.receiver.stats()
     }
 
     pub fn setup(&self) {
@@ -88,7 +93,7 @@ impl RtspClient {
         if let Some(socket) = &self.socket
             && let Err(e) = (&*socket).write_all(request.as_bytes())
         {
-            println!("Не удалось отправить RTSP-запрос: {e}");
+            println!("Failed to send RTSP request: {e}");
         }
         println!("\nData sent:\n{request}");
         true
@@ -140,8 +145,8 @@ impl RtspClient {
             Method::Setup => {
                 if self.receiver.open(self.rtp_port).is_err() {
                     self.ui.show_warning(
-                        "Невозможно привязать",
-                        format!("Невозможно привязать сокет к порту={}", self.rtp_port),
+                        "Bind failed",
+                        format!("Cannot bind socket to port {}", self.rtp_port),
                     );
                 }
             }

@@ -47,11 +47,11 @@ impl ServerWorker {
                 Ok(n) => n,
             };
             let data = String::from_utf8_lossy(&buf[..n]);
-            println!("Данные получены:\n{data}");
+            println!("Data received:\n{data}");
 
             match RtspRequest::parse(&data) {
                 Some(request) => self.process_rtsp_request(request),
-                None => println!("Некорректный запрос"),
+                None => println!("Malformed request"),
             }
         }
         self.stop_streaming();
@@ -61,7 +61,7 @@ impl ServerWorker {
         if !self.state.allows(request.method) {
             return;
         }
-        println!("обрабатываем команду {}\n", request.method);
+        println!("Processing {}\n", request.method);
 
         let result = match request.method {
             Method::Setup => self.setup(&request),
@@ -87,7 +87,7 @@ impl ServerWorker {
     }
 
     fn setup(&mut self, request: &RtspRequest) -> Result<(), &'static str> {
-        self.video = Some(VideoStream::open(&request.file_name).map_err(|_| "404 Файл не найден")?);
+        self.video = Some(VideoStream::open(&request.file_name).map_err(|_| "404 File not found")?);
         self.rtp_port = request.client_port;
         // Генерируем случайный идентификатор сеанса RTSP
         self.session = rand::rng().random_range(100000..=999999);
@@ -95,7 +95,7 @@ impl ServerWorker {
     }
 
     fn play(&mut self) -> Result<(), &'static str> {
-        const CON_ERR: &str = "500 Ошибка соединения";
+        const CON_ERR: &str = "500 Connection error";
         let port = self.rtp_port.ok_or(CON_ERR)?;
         let video = self.video.take().ok_or(CON_ERR)?;
         let dest = SocketAddr::new(self.client_ip, port);
@@ -113,7 +113,7 @@ impl ServerWorker {
     fn reply_ok(&mut self, cseq: u32) {
         let reply = RtspReply::ok(cseq, self.session).to_string();
         if self.rtsp_socket.write_all(reply.as_bytes()).is_err() {
-            println!("Ошибка соединения");
+            println!("Connection error");
         }
     }
 }

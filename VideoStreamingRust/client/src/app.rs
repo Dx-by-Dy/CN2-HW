@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use eframe::egui;
 
@@ -6,7 +7,7 @@ use crate::config::Config;
 use crate::rtsp_client::RtspClient;
 use crate::ui_handle::UiHandle;
 
-/// Окно клиента: кнопки управления и область видео.
+/// Окно клиента: кнопки управления, область видео и статистика.
 pub struct ClientApp {
     rtsp: Arc<RtspClient>,
     ui: Arc<UiHandle>,
@@ -78,6 +79,43 @@ impl ClientApp {
         });
     }
 
+    fn stats_panel(&self, ui: &mut egui::Ui) {
+        let now = Instant::now();
+        let stats = self.rtsp.stats();
+        egui::Panel::right("stats")
+            .resizable(false)
+            .exact_size(250.0)
+            .show(ui, |ui| {
+                ui.heading("Statistics");
+                egui::Grid::new("stats_grid")
+                    .num_columns(2)
+                    .striped(true)
+                    .show(ui, |ui| {
+                        let mut row = |name: &str, value: String| {
+                            ui.label(name);
+                            ui.label(value);
+                            ui.end_row();
+                        };
+                        row("Packets received", stats.received().to_string());
+                        row(
+                            "Packets lost",
+                            format!("{} ({:.2} %)", stats.lost(), stats.loss_rate() * 100.0),
+                        );
+                        row("Out of order", stats.out_of_order().to_string());
+                        row("Bitrate", format_bitrate(stats.current_bitrate(now)));
+                        row(
+                            "Average bitrate",
+                            format_bitrate(stats.average_bitrate(now)),
+                        );
+                        row(
+                            "Frames per second",
+                            format!("{:.0}", stats.current_fps(now)),
+                        );
+                        row("Data received", format_bytes(stats.total_bytes()));
+                    });
+            });
+    }
+
     fn video_panel(&self, ui: &mut egui::Ui) {
         egui::CentralPanel::default_margins().show(ui, |ui| {
             ui.centered_and_justified(|ui| {
@@ -93,8 +131,8 @@ impl ClientApp {
             return;
         }
         egui::Modal::new(egui::Id::unique("exit_dialog")).show(ctx, |ui| {
-            ui.heading("Выход?");
-            ui.label("Вы уверены, что хотите выйти из приложения?");
+            ui.heading("Quit?");
+            ui.label("Are you sure you want to quit?");
             ui.horizontal(|ui| {
                 if ui.button("OK").clicked() {
                     self.exit_dialog = false;
@@ -129,8 +167,30 @@ impl eframe::App for ClientApp {
         self.update_texture(&ctx);
         self.handle_close_request(&ctx);
         self.buttons_panel(ui, &ctx);
+        self.stats_panel(ui);
         self.video_panel(ui);
         self.exit_dialog(&ctx);
         self.warning_dialog(&ctx);
+        // Обновляем статистику и на паузе, когда кадры не приходят
+        ctx.request_repaint_after(Duration::from_millis(250));
+    }
+}
+
+fn format_bitrate(bits_per_sec: f64) -> String {
+    if bits_per_sec >= 1e6 {
+        format!("{:.2} Mbit/s", bits_per_sec / 1e6)
+    } else if bits_per_sec >= 1e3 {
+        format!("{:.1} kbit/s", bits_per_sec / 1e3)
+    } else {
+        format!("{bits_per_sec:.0} bit/s")
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    let bytes = bytes as f64;
+    if bytes >= 1024.0 * 1024.0 {
+        format!("{:.2} MB", bytes / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1} KB", bytes / 1024.0)
     }
 }

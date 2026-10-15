@@ -1,13 +1,14 @@
 use std::io;
 use std::net::UdpSocket;
 use std::sync::atomic::{AtomicU16, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use common::{Event, RtpPacket};
 use eframe::egui;
 
+use crate::stats::Stats;
 use crate::ui_handle::UiHandle;
 
 /// Прием RTP-пакетов с кадрами видео.
@@ -17,6 +18,7 @@ pub struct RtpReceiver {
     stop: Mutex<Arc<Event>>,
     /// Номер последнего показанного кадра.
     frame_nbr: AtomicU16,
+    stats: Mutex<Stats>,
     ui: Arc<UiHandle>,
 }
 
@@ -26,6 +28,7 @@ impl RtpReceiver {
             socket: Mutex::new(None),
             stop: Mutex::new(Arc::new(Event::new())),
             frame_nbr: AtomicU16::new(0),
+            stats: Mutex::new(Stats::default()),
             ui,
         }
     }
@@ -42,6 +45,7 @@ impl RtpReceiver {
     pub fn start(self: &Arc<Self>) {
         let stop = Arc::new(Event::new());
         *self.stop.lock().unwrap() = Arc::clone(&stop);
+        self.stats().on_play(Instant::now());
         let receiver = Arc::clone(self);
         thread::spawn(move || receiver.listen(&stop));
     }
@@ -49,12 +53,17 @@ impl RtpReceiver {
     /// Останавливаем поток приема (PAUSE).
     pub fn stop(&self) {
         self.stop.lock().unwrap().set();
+        self.stats().on_pause(Instant::now());
     }
 
     /// Останавливаем прием и закрываем сокет (TEARDOWN).
     pub fn close(&self) {
         self.stop();
         *self.socket.lock().unwrap() = None;
+    }
+
+    pub fn stats(&self) -> MutexGuard<'_, Stats> {
+        self.stats.lock().unwrap()
     }
 
     fn listen(&self, stop: &Event) {
@@ -75,14 +84,16 @@ impl RtpReceiver {
         packet.decode(data);
 
         let curr_frame_nbr = packet.seq_num();
-        println!("Текущий номер последовательности: {curr_frame_nbr}");
+        println!("Current seq num: {curr_frame_nbr}");
+        self.stats()
+            .on_packet(curr_frame_nbr, packet.get_payload().len(), Instant::now());
 
         // Отбрасываем опоздавшие пакеты
         if curr_frame_nbr > self.frame_nbr.load(Ordering::Relaxed) {
             self.frame_nbr.store(curr_frame_nbr, Ordering::Relaxed);
             match decode_jpeg(packet.get_payload()) {
                 Some(frame) => self.ui.show_frame(frame),
-                None => println!("Не удалось декодировать кадр"),
+                None => println!("Failed to decode frame"),
             }
         }
     }
